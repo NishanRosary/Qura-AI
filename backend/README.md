@@ -3,8 +3,8 @@
 FastAPI backend for a local RAG workflow with:
 
 - ChromaDB as the persistent vector database
-- OpenAI embeddings for retrieval
-- OpenAI chat completion for answer generation
+- Google AI embeddings for retrieval
+- Google Gemini for answer generation
 - File ingestion for `pdf`, `docx`, `txt`, and `md`
 
 ## Run
@@ -15,7 +15,7 @@ FastAPI backend for a local RAG workflow with:
 pip install -r requirements.txt
 ```
 
-2. Copy `.env.example` to `.env` and add your OpenAI API key.
+2. Copy `.env.example` to `.env` and add your Google AI API key.
 
 3. Start the API:
 

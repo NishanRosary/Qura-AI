@@ -7,9 +7,9 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Settings:
-    openai_api_key: str
-    openai_chat_model: str
-    openai_embedding_model: str
+    google_api_key: str
+    gemini_model: str
+    embedding_model: str
     chroma_collection: str
     chroma_path: Path
     upload_dir: Path
@@ -41,12 +41,9 @@ def get_settings() -> Settings:
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     return Settings(
-        openai_api_key=os.getenv("OPENAI_API_KEY", ""),
-        openai_chat_model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-mini"),
-        openai_embedding_model=os.getenv(
-            "OPENAI_EMBEDDING_MODEL",
-            "text-embedding-3-small",
-        ),
+        google_api_key=os.getenv("GOOGLE_API_KEY", ""),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        embedding_model=os.getenv("EMBEDDING_MODEL", "gemini-embedding-001"),
         chroma_collection=os.getenv("CHROMA_COLLECTION", "rag-documents"),
         chroma_path=chroma_path,
         upload_dir=upload_dir,

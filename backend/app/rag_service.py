@@ -7,7 +7,7 @@ from typing import Iterable, List
 
 import chromadb
 from docx import Document as DocxDocument
-from openai import OpenAI
+from google import genai
 from pypdf import PdfReader
 
 from .config import Settings
@@ -19,7 +19,7 @@ SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 class RagService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.openai_client = OpenAI(api_key=settings.openai_api_key)
+        self.google_client = genai.Client(api_key=settings.google_api_key)
         self.chroma_client = chromadb.PersistentClient(path=str(settings.chroma_path))
         self.collection = self._create_collection()
 
@@ -103,8 +103,8 @@ class RagService:
         return indexed_documents
 
     def query(self, question: str) -> tuple[str, List[SourceChunk]]:
-        if not self.settings.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is missing. Add it to backend/.env.")
+        if not self.settings.google_api_key:
+            raise ValueError("GOOGLE_API_KEY is missing. Add it to backend/.env.")
 
         query_embedding = self._embed_texts([question])[0]
         results = self.collection.query(
@@ -146,22 +146,16 @@ class RagService:
             f"Context:\n{context}"
         )
 
-        response = self.openai_client.chat.completions.create(
-            model=self.settings.openai_chat_model,
-            temperature=0.2,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a retrieval-augmented assistant. "
-                        "Use retrieved context faithfully and do not invent citations."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
+        response = self.google_client.models.generate_content(
+            model=self.settings.gemini_model,
+            contents=(
+                "You are a retrieval-augmented assistant. "
+                "Use retrieved context faithfully and do not invent citations.\n\n"
+                f"{prompt}"
+            ),
         )
 
-        answer = response.choices[0].message.content or "No answer returned."
+        answer = response.text or "No answer returned."
         return answer, sources
 
     def clear(self) -> None:
@@ -180,14 +174,37 @@ class RagService:
         self.settings.upload_dir.mkdir(parents=True, exist_ok=True)
 
     def _embed_texts(self, values: List[str]) -> List[List[float]]:
-        if not self.settings.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is missing. Add it to backend/.env.")
+        if not self.settings.google_api_key:
+            raise ValueError("GOOGLE_API_KEY is missing. Add it to backend/.env.")
 
-        response = self.openai_client.embeddings.create(
-            model=self.settings.openai_embedding_model,
-            input=values,
+        response = self.google_client.models.embed_content(
+            model=self.settings.embedding_model,
+            contents=values,
         )
-        return [item.embedding for item in response.data]
+        embeddings = []
+
+        for item in response.embeddings:
+            if getattr(item, "values", None) is not None:
+                embeddings.append(item.values)
+                continue
+
+            embedding = getattr(item, "embedding", None)
+            if embedding is not None and getattr(embedding, "values", None) is not None:
+                embeddings.append(embedding.values)
+                continue
+
+            if isinstance(item, dict):
+                if "values" in item:
+                    embeddings.append(item["values"])
+                    continue
+                nested = item.get("embedding", {})
+                if isinstance(nested, dict) and "values" in nested:
+                    embeddings.append(nested["values"])
+                    continue
+
+            raise ValueError("Unexpected embedding response from Google AI.")
+
+        return embeddings
 
     def _extract_text(self, path: Path) -> str:
         suffix = path.suffix.lower()
