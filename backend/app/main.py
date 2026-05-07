@@ -53,5 +53,8 @@ def query_documents(request: QueryRequest) -> QueryResponse:
 
 @app.delete("/api/documents")
 def clear_documents() -> dict:
-    rag_service.clear()
+    try:
+        rag_service.clear()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to clear documents: {exc}") from exc
     return {"status": "cleared"}

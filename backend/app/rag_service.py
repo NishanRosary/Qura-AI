@@ -21,8 +21,11 @@ class RagService:
         self.settings = settings
         self.openai_client = OpenAI(api_key=settings.openai_api_key)
         self.chroma_client = chromadb.PersistentClient(path=str(settings.chroma_path))
-        self.collection = self.chroma_client.get_or_create_collection(
-            name=settings.chroma_collection,
+        self.collection = self._create_collection()
+
+    def _create_collection(self):
+        return self.chroma_client.get_or_create_collection(
+            name=self.settings.chroma_collection,
             metadata={"hnsw:space": "cosine"},
         )
 
@@ -162,14 +165,19 @@ class RagService:
         return answer, sources
 
     def clear(self) -> None:
-        all_items = self.collection.get()
-        ids = all_items.get("ids", [])
-        if ids:
-            self.collection.delete(ids=ids)
+        try:
+            self.chroma_client.delete_collection(name=self.settings.chroma_collection)
+        except Exception:
+            # If the collection does not exist or Chroma returns a benign cleanup error,
+            # we still want the reset flow to continue.
+            pass
 
-        for file_path in self.settings.upload_dir.iterdir():
-            if file_path.is_file():
-                file_path.unlink()
+        self.collection = self._create_collection()
+
+        if self.settings.upload_dir.exists():
+            shutil.rmtree(self.settings.upload_dir, ignore_errors=True)
+
+        self.settings.upload_dir.mkdir(parents=True, exist_ok=True)
 
     def _embed_texts(self, values: List[str]) -> List[List[float]]:
         if not self.settings.openai_api_key:
