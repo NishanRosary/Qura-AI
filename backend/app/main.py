@@ -37,6 +37,8 @@ async def upload_documents(files: list[UploadFile] = File(...)) -> UploadRespons
         documents = await rag_service.ingest_files(files)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to index documents: {exc}") from exc
 
     return UploadResponse(documents=documents, indexed_count=len(documents))
 
@@ -47,6 +49,8 @@ def query_documents(request: QueryRequest) -> QueryResponse:
         answer, sources = rag_service.query(request.question)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to query documents: {exc}") from exc
 
     return QueryResponse(answer=answer, sources=sources)
 

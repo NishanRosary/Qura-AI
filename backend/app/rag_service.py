@@ -14,6 +14,7 @@ from .config import Settings
 from .schemas import DocumentSummary, SourceChunk
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
+EMBEDDING_BATCH_SIZE = 100
 
 
 class RagService:
@@ -177,32 +178,35 @@ class RagService:
         if not self.settings.google_api_key:
             raise ValueError("GOOGLE_API_KEY is missing. Add it to backend/.env.")
 
-        response = self.google_client.models.embed_content(
-            model=self.settings.embedding_model,
-            contents=values,
-        )
         embeddings = []
 
-        for item in response.embeddings:
-            if getattr(item, "values", None) is not None:
-                embeddings.append(item.values)
-                continue
+        for start in range(0, len(values), EMBEDDING_BATCH_SIZE):
+            batch = values[start : start + EMBEDDING_BATCH_SIZE]
+            response = self.google_client.models.embed_content(
+                model=self.settings.embedding_model,
+                contents=batch,
+            )
 
-            embedding = getattr(item, "embedding", None)
-            if embedding is not None and getattr(embedding, "values", None) is not None:
-                embeddings.append(embedding.values)
-                continue
-
-            if isinstance(item, dict):
-                if "values" in item:
-                    embeddings.append(item["values"])
-                    continue
-                nested = item.get("embedding", {})
-                if isinstance(nested, dict) and "values" in nested:
-                    embeddings.append(nested["values"])
+            for item in response.embeddings:
+                if getattr(item, "values", None) is not None:
+                    embeddings.append(item.values)
                     continue
 
-            raise ValueError("Unexpected embedding response from Google AI.")
+                embedding = getattr(item, "embedding", None)
+                if embedding is not None and getattr(embedding, "values", None) is not None:
+                    embeddings.append(embedding.values)
+                    continue
+
+                if isinstance(item, dict):
+                    if "values" in item:
+                        embeddings.append(item["values"])
+                        continue
+                    nested = item.get("embedding", {})
+                    if isinstance(nested, dict) and "values" in nested:
+                        embeddings.append(nested["values"])
+                        continue
+
+                raise ValueError("Unexpected embedding response from Google AI.")
 
         return embeddings
 
