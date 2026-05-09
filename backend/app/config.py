@@ -34,8 +34,9 @@ def _load_env_file() -> None:
 def get_settings() -> Settings:
     _load_env_file()
 
-    chroma_path = Path(os.getenv("CHROMA_PATH", "./data/chroma")).resolve()
-    upload_dir = Path(os.getenv("UPLOAD_DIR", "./data/uploads")).resolve()
+    backend_dir = Path(__file__).resolve().parents[1]
+    chroma_path = Path(os.getenv("CHROMA_PATH", backend_dir / "data" / "chroma")).resolve()
+    upload_dir = Path(os.getenv("UPLOAD_DIR", backend_dir / "data" / "uploads")).resolve()
 
     chroma_path.mkdir(parents=True, exist_ok=True)
     upload_dir.mkdir(parents=True, exist_ok=True)

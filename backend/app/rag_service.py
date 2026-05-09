@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -20,7 +21,11 @@ EMBEDDING_BATCH_SIZE = 100
 class RagService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.google_client = genai.Client(api_key=settings.google_api_key)
+        self.google_client = (
+            genai.Client(api_key=settings.google_api_key)
+            if settings.google_api_key
+            else None
+        )
         self.chroma_client = chromadb.PersistentClient(path=str(settings.chroma_path))
         self.collection = self._create_collection()
 
@@ -104,18 +109,7 @@ class RagService:
         return indexed_documents
 
     def query(self, question: str) -> tuple[str, List[SourceChunk]]:
-        if not self.settings.google_api_key:
-            raise ValueError("GOOGLE_API_KEY is missing. Add it to backend/.env.")
-
-        query_embedding = self._embed_texts([question])[0]
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=self.settings.top_k_results,
-            include=["documents", "metadatas", "distances"],
-        )
-
-        documents = results.get("documents", [[]])[0]
-        metadatas = results.get("metadatas", [[]])[0]
+        documents, metadatas = self._retrieve_context(question)
 
         if not documents:
             raise ValueError("No indexed documents found. Upload and process documents first.")
@@ -147,17 +141,131 @@ class RagService:
             f"Context:\n{context}"
         )
 
-        response = self.google_client.models.generate_content(
-            model=self.settings.gemini_model,
-            contents=(
-                "You are a retrieval-augmented assistant. "
-                "Use retrieved context faithfully and do not invent citations.\n\n"
-                f"{prompt}"
-            ),
-        )
+        answer = self._extractive_answer(question, documents)
+        if self.google_client:
+            try:
+                response = self.google_client.models.generate_content(
+                    model=self.settings.gemini_model,
+                    contents=(
+                        "You are a retrieval-augmented assistant. "
+                        "Use retrieved context faithfully and do not invent citations.\n\n"
+                        f"{prompt}"
+                    ),
+                )
+                answer = response.text or answer
+            except Exception:
+                pass
 
-        answer = response.text or "No answer returned."
         return answer, sources
+
+    def _retrieve_context(self, question: str) -> tuple[List[str], List[dict]]:
+        if self.settings.google_api_key:
+            try:
+                query_embedding = self._embed_texts([question])[0]
+                results = self.collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=self.settings.top_k_results,
+                    include=["documents", "metadatas", "distances"],
+                )
+                return (
+                    results.get("documents", [[]])[0],
+                    results.get("metadatas", [[]])[0],
+                )
+            except Exception:
+                pass
+
+        return self._keyword_retrieve(question)
+
+    def _keyword_retrieve(self, question: str) -> tuple[List[str], List[dict]]:
+        data = self.collection.get(include=["documents", "metadatas"])
+        all_documents = data.get("documents", [])
+        all_metadatas = data.get("metadatas", [])
+        query_terms = self._tokenize(question)
+
+        scored_chunks = []
+        for index, (document_text, metadata) in enumerate(zip(all_documents, all_metadatas)):
+            if not document_text or not metadata:
+                continue
+
+            document_terms = self._tokenize(document_text)
+            score = sum(document_terms.count(term) for term in query_terms)
+            if score == 0:
+                score = 1 if any(term in document_text.lower() for term in query_terms) else 0
+
+            scored_chunks.append((score, -index, document_text, metadata))
+
+        scored_chunks.sort(reverse=True)
+        selected = [
+            (document_text, metadata)
+            for score, _, document_text, metadata in scored_chunks
+            if score > 0
+        ][: self.settings.top_k_results]
+
+        if not selected:
+            selected = [
+                (document_text, metadata)
+                for document_text, metadata in zip(all_documents, all_metadatas)
+                if document_text and metadata
+            ][: self.settings.top_k_results]
+
+        return [item[0] for item in selected], [item[1] for item in selected]
+
+    def _extractive_answer(self, question: str, documents: List[str]) -> str:
+        query_terms = set(self._tokenize(question))
+        sentences = []
+
+        for document_text in documents:
+            for sentence in re.split(r"(?<=[.!?])\s+", document_text):
+                cleaned = sentence.strip()
+                if not cleaned:
+                    continue
+                score = sum(1 for term in self._tokenize(cleaned) if term in query_terms)
+                sentences.append((score, cleaned))
+
+        sentences.sort(reverse=True)
+        selected = [sentence for score, sentence in sentences if score > 0][:3]
+        if not selected:
+            selected = [document.strip() for document in documents if document.strip()][:1]
+
+        if not selected:
+            return "I could not find relevant text in the processed documents."
+
+        return "Based on the processed document context:\n\n" + "\n\n".join(selected)
+
+    def _tokenize(self, value: str) -> List[str]:
+        stop_words = {
+            "a",
+            "an",
+            "and",
+            "are",
+            "as",
+            "at",
+            "be",
+            "by",
+            "for",
+            "from",
+            "in",
+            "is",
+            "it",
+            "of",
+            "on",
+            "or",
+            "that",
+            "the",
+            "to",
+            "what",
+            "when",
+            "where",
+            "which",
+            "who",
+            "why",
+            "with",
+        }
+        return [
+            token
+            for token in re.findall(r"[a-z0-9]+", value.lower())
+            if len(token) > 2 and token not in stop_words
+        ]
 
     def clear(self) -> None:
         try:
@@ -179,6 +287,8 @@ class RagService:
             raise ValueError("GOOGLE_API_KEY is missing. Add it to backend/.env.")
 
         embeddings = []
+        if not self.google_client:
+            self.google_client = genai.Client(api_key=self.settings.google_api_key)
 
         for start in range(0, len(values), EMBEDDING_BATCH_SIZE):
             batch = values[start : start + EMBEDDING_BATCH_SIZE]
