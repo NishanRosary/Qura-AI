@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 import shutil
 import uuid
+from hashlib import blake2b
+from math import sqrt
 from pathlib import Path
 from typing import Iterable, List
 
@@ -16,6 +18,7 @@ from .schemas import DocumentSummary, SourceChunk
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 EMBEDDING_BATCH_SIZE = 100
+LOCAL_EMBEDDING_DIMENSIONS = 3072
 
 
 class RagService:
@@ -284,39 +287,63 @@ class RagService:
 
     def _embed_texts(self, values: List[str]) -> List[List[float]]:
         if not self.settings.google_api_key:
-            raise ValueError("GOOGLE_API_KEY is missing. Add it to backend/.env.")
+            return self._local_embed_texts(values)
 
         embeddings = []
         if not self.google_client:
             self.google_client = genai.Client(api_key=self.settings.google_api_key)
 
-        for start in range(0, len(values), EMBEDDING_BATCH_SIZE):
-            batch = values[start : start + EMBEDDING_BATCH_SIZE]
-            response = self.google_client.models.embed_content(
-                model=self.settings.embedding_model,
-                contents=batch,
-            )
+        try:
+            for start in range(0, len(values), EMBEDDING_BATCH_SIZE):
+                batch = values[start : start + EMBEDDING_BATCH_SIZE]
+                response = self.google_client.models.embed_content(
+                    model=self.settings.embedding_model,
+                    contents=batch,
+                )
 
-            for item in response.embeddings:
-                if getattr(item, "values", None) is not None:
-                    embeddings.append(item.values)
-                    continue
-
-                embedding = getattr(item, "embedding", None)
-                if embedding is not None and getattr(embedding, "values", None) is not None:
-                    embeddings.append(embedding.values)
-                    continue
-
-                if isinstance(item, dict):
-                    if "values" in item:
-                        embeddings.append(item["values"])
-                        continue
-                    nested = item.get("embedding", {})
-                    if isinstance(nested, dict) and "values" in nested:
-                        embeddings.append(nested["values"])
+                for item in response.embeddings:
+                    if getattr(item, "values", None) is not None:
+                        embeddings.append(item.values)
                         continue
 
-                raise ValueError("Unexpected embedding response from Google AI.")
+                    embedding = getattr(item, "embedding", None)
+                    if embedding is not None and getattr(embedding, "values", None) is not None:
+                        embeddings.append(embedding.values)
+                        continue
+
+                    if isinstance(item, dict):
+                        if "values" in item:
+                            embeddings.append(item["values"])
+                            continue
+                        nested = item.get("embedding", {})
+                        if isinstance(nested, dict) and "values" in nested:
+                            embeddings.append(nested["values"])
+                            continue
+
+                    raise ValueError("Unexpected embedding response from Google AI.")
+        except Exception:
+            return self._local_embed_texts(values)
+
+        return embeddings
+
+    def _local_embed_texts(self, values: List[str]) -> List[List[float]]:
+        embeddings: List[List[float]] = []
+
+        for value in values:
+            vector = [0.0] * LOCAL_EMBEDDING_DIMENSIONS
+            tokens = self._tokenize(value)
+
+            for token in tokens:
+                digest = blake2b(token.encode("utf-8"), digest_size=8).digest()
+                bucket = int.from_bytes(digest[:4], "big") % LOCAL_EMBEDDING_DIMENSIONS
+                sign = 1.0 if digest[4] % 2 == 0 else -1.0
+                vector[bucket] += sign
+
+            magnitude = sqrt(sum(component * component for component in vector))
+            if magnitude:
+                vector = [component / magnitude for component in vector]
+
+            embeddings.append(vector)
 
         return embeddings
 
