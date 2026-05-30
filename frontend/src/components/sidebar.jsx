@@ -41,7 +41,7 @@ function Sidebar({
       <div className="brand">
         <div className="brand-name">
           <div className="brand-dot"></div>
-          Knowledge Assistant
+          Qura - Knowledge Assistant
         </div>
         <div className="brand-sub">AI-powered document chat</div>
       </div>

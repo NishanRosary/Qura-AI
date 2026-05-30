@@ -4,7 +4,7 @@ function ChatArea({ messages, hasDocuments }) {
       <div className="chat-area">
         <div className="messages-inner">
           <div className="empty-state">
-            <div className="empty-icon">RAG</div>
+            <div className="empty-icon">QURA</div>
 
             <div className="empty-title">
               Ask anything about your documents
