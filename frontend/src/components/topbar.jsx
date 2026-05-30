@@ -7,12 +7,7 @@ function Topbar({ documentCount, isBusy }) {
       </div>
 
       <div className="topbar-title">Knowledge Assistant</div>
-
-      <div className="topbar-actions">
-        <button className="icon-btn" type="button">RAG</button>
-        <button className="icon-btn" type="button">DB</button>
-        <button className="icon-btn" type="button">AI</button>
-      </div>
+      <div className="topbar-spacer"></div>
     </div>
   );
 }

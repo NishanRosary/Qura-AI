@@ -185,7 +185,6 @@ body,
 }
 
 .files-section {
-  flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -273,6 +272,85 @@ body,
   border: 1px dashed var(--border);
   border-radius: var(--radius-md);
   padding: 16px 12px;
+  color: var(--text-3);
+  font-size: 12px;
+  text-align: center;
+  background: rgba(255,255,255,0.45);
+}
+
+.history-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 140px;
+  overflow: hidden;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 2px;
+}
+
+.history-list::-webkit-scrollbar {
+  width: 3px;
+}
+
+.history-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 99px;
+}
+
+.history-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 9px 10px;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.history-card:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.history-question,
+.history-answer {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+
+.history-question {
+  -webkit-line-clamp: 2;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text-1);
+}
+
+.history-answer {
+  -webkit-line-clamp: 1;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--text-3);
+}
+
+.history-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 12px;
   color: var(--text-3);
   font-size: 12px;
   text-align: center;
@@ -371,6 +449,11 @@ body,
 .topbar-actions {
   display: flex;
   gap: 4px;
+}
+
+.topbar-spacer {
+  width: 128px;
+  flex-shrink: 0;
 }
 
 .icon-btn {

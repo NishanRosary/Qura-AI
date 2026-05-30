@@ -26,12 +26,13 @@ function ChatArea({ messages, hasDocuments }) {
       <div className="messages-inner">
         {messages.map((message) => (
           <div
+            id={message.id}
             className={`message-row ${message.role === "user" ? "user" : "assistant"}`}
             key={message.id}
           >
             <div className={`message-bubble ${message.error ? "error" : ""}`}>
               <div className="message-role">
-                {message.role === "user" ? "You" : "Assistant"}
+                {message.role === "user" ? "You" : "Qura"}
               </div>
               <div className="message-text">{message.content}</div>
             </div>

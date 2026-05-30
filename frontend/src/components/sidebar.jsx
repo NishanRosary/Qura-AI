@@ -12,10 +12,12 @@ function formatFileSize(bytes) {
 
 function Sidebar({
   documents,
+  messages,
   selectedFiles,
   onFilesSelected,
   onProcessDocuments,
   onClearDocuments,
+  onHistorySelect,
   isProcessing,
 }) {
   const filesToDisplay = selectedFiles.length
@@ -31,6 +33,27 @@ function Sidebar({
         sizeLabel: `${document.chunks} chunks`,
         ready: true,
       }));
+
+  const historyItems = messages
+    .reduce((items, message, index) => {
+      if (message.role !== "user") {
+        return items;
+      }
+
+      const response = messages
+        .slice(index + 1)
+        .find((nextMessage) => nextMessage.role === "assistant");
+
+      return [
+        ...items,
+        {
+          id: message.id,
+          question: message.content,
+          answer: response?.content || "Waiting for Qura response...",
+        },
+      ];
+    }, [])
+    .reverse();
 
   function handleChange(event) {
     onFilesSelected(Array.from(event.target.files || []));
@@ -93,6 +116,28 @@ function Sidebar({
             ))
           ) : (
             <div className="file-empty">No documents uploaded yet.</div>
+          )}
+        </div>
+      </div>
+
+      <div className="history-panel">
+        <div className="section-label">History</div>
+
+        <div className="history-list">
+          {historyItems.length ? (
+            historyItems.map((item) => (
+              <button
+                className="history-card"
+                key={item.id}
+                type="button"
+                onClick={() => onHistorySelect(item.id)}
+              >
+                <span className="history-question">{item.question}</span>
+                <span className="history-answer">{item.answer}</span>
+              </button>
+            ))
+          ) : (
+            <div className="history-empty">Your chat history will appear here.</div>
           )}
         </div>
       </div>

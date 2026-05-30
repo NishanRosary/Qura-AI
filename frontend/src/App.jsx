@@ -139,6 +139,14 @@ function App() {
     }
   }
 
+  function handleHistorySelect(messageId) {
+    const messageElement = window.document.getElementById(messageId);
+
+    if (messageElement) {
+      messageElement.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
   async function handleSend(question) {
     const trimmedQuestion = question.trim();
     if (!trimmedQuestion) {
@@ -146,7 +154,7 @@ function App() {
         createToast(
           "warning",
           "Question Required",
-          "Type a question before sending it to the assistant."
+          "Type a question before sending it to Qura."
         )
       );
       return;
@@ -212,7 +220,7 @@ function App() {
         createToast(
           "error",
           "Query Failed",
-          error.message || "The assistant could not answer from the current knowledge base."
+          error.message || "Qura could not answer from the current knowledge base."
         )
       );
     } finally {
@@ -227,10 +235,12 @@ function App() {
       <div className="shell">
         <Sidebar
           documents={documents}
+          messages={messages}
           selectedFiles={selectedFiles}
           onFilesSelected={setSelectedFiles}
           onProcessDocuments={handleProcessDocuments}
           onClearDocuments={handleClearDocuments}
+          onHistorySelect={handleHistorySelect}
           isProcessing={isUploading}
         />
 
