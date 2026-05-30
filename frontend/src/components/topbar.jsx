@@ -3,7 +3,7 @@ function Topbar({ documentCount, isBusy }) {
     <div className="topbar">
       <div className="topbar-indicator">
         <div className={`status-dot ${isBusy ? "busy" : ""}`}></div>
-        <span>{documentCount} documents indexed</span>
+        <span>{documentCount} document{documentCount !== 1 ? "s" : ""} indexed</span>
       </div>
 
       <div className="topbar-title">Knowledge Assistant</div>
