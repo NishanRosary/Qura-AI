@@ -10,6 +10,8 @@ class Settings:
     google_api_key: str
     gemini_model: str
     embedding_model: str
+    use_google_embeddings: bool
+    use_gemini_answers: bool
     chroma_collection: str
     chroma_path: Path
     upload_dir: Path
@@ -41,10 +43,15 @@ def get_settings() -> Settings:
     chroma_path.mkdir(parents=True, exist_ok=True)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
+    def env_bool(name: str, default: str = "false") -> bool:
+        return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
     return Settings(
         google_api_key=os.getenv("GOOGLE_API_KEY", ""),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         embedding_model=os.getenv("EMBEDDING_MODEL", "gemini-embedding-001"),
+        use_google_embeddings=env_bool("USE_GOOGLE_EMBEDDINGS"),
+        use_gemini_answers=env_bool("USE_GEMINI_ANSWERS"),
         chroma_collection=os.getenv("CHROMA_COLLECTION", "rag-documents"),
         chroma_path=chroma_path,
         upload_dir=upload_dir,

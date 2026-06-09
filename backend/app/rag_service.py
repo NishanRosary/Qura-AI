@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 import uuid
+from collections import Counter
 from hashlib import blake2b
 from math import sqrt
 from pathlib import Path
@@ -31,6 +32,7 @@ class RagService:
         )
         self.chroma_client = chromadb.PersistentClient(path=str(settings.chroma_path))
         self.collection = self._create_collection()
+        self._chunk_cache: list[dict] | None = None
 
     def _create_collection(self):
         return self.chroma_client.get_or_create_collection(
@@ -39,10 +41,10 @@ class RagService:
         )
 
     def list_documents(self) -> List[DocumentSummary]:
-        data = self.collection.get(include=["metadatas"])
         documents = {}
 
-        for metadata in data.get("metadatas", []):
+        for item in self._get_chunk_cache():
+            metadata = item["metadata"]
             if not metadata:
                 continue
             document_id = metadata["document_id"]
@@ -99,6 +101,7 @@ class RagService:
                 embeddings=embeddings,
                 metadatas=metadatas,
             )
+            self._append_to_chunk_cache(chunks, metadatas)
 
             indexed_documents.append(
                 DocumentSummary(
@@ -145,7 +148,7 @@ class RagService:
         )
 
         answer = self._extractive_answer(question, documents)
-        if self.google_client:
+        if self.settings.use_gemini_answers and self.google_client:
             try:
                 response = self.google_client.models.generate_content(
                     model=self.settings.gemini_model,
@@ -162,7 +165,7 @@ class RagService:
         return answer, sources
 
     def _retrieve_context(self, question: str) -> tuple[List[str], List[dict]]:
-        if self.settings.google_api_key:
+        if self.settings.use_google_embeddings and self.settings.google_api_key:
             try:
                 query_embedding = self._embed_texts([question])[0]
                 results = self.collection.query(
@@ -180,20 +183,21 @@ class RagService:
         return self._keyword_retrieve(question)
 
     def _keyword_retrieve(self, question: str) -> tuple[List[str], List[dict]]:
-        data = self.collection.get(include=["documents", "metadatas"])
-        all_documents = data.get("documents", [])
-        all_metadatas = data.get("metadatas", [])
+        cache = self._get_chunk_cache()
         query_terms = self._tokenize(question)
 
         scored_chunks = []
-        for index, (document_text, metadata) in enumerate(zip(all_documents, all_metadatas)):
+        for index, item in enumerate(cache):
+            document_text = item["document"]
+            metadata = item["metadata"]
             if not document_text or not metadata:
                 continue
 
-            document_terms = self._tokenize(document_text)
-            score = sum(document_terms.count(term) for term in query_terms)
+            term_counts = item["term_counts"]
+            score = sum(term_counts.get(term, 0) for term in query_terms)
             if score == 0:
-                score = 1 if any(term in document_text.lower() for term in query_terms) else 0
+                lower_text = item["lower_text"]
+                score = 1 if any(term in lower_text for term in query_terms) else 0
 
             scored_chunks.append((score, -index, document_text, metadata))
 
@@ -206,9 +210,9 @@ class RagService:
 
         if not selected:
             selected = [
-                (document_text, metadata)
-                for document_text, metadata in zip(all_documents, all_metadatas)
-                if document_text and metadata
+                (item["document"], item["metadata"])
+                for item in cache
+                if item["document"] and item["metadata"]
             ][: self.settings.top_k_results]
 
         return [item[0] for item in selected], [item[1] for item in selected]
@@ -279,6 +283,7 @@ class RagService:
             pass
 
         self.collection = self._create_collection()
+        self._chunk_cache = []
 
         if self.settings.upload_dir.exists():
             shutil.rmtree(self.settings.upload_dir, ignore_errors=True)
@@ -286,7 +291,7 @@ class RagService:
         self.settings.upload_dir.mkdir(parents=True, exist_ok=True)
 
     def _embed_texts(self, values: List[str]) -> List[List[float]]:
-        if not self.settings.google_api_key:
+        if not self.settings.use_google_embeddings or not self.settings.google_api_key:
             return self._local_embed_texts(values)
 
         embeddings = []
@@ -325,6 +330,39 @@ class RagService:
             return self._local_embed_texts(values)
 
         return embeddings
+
+    def _get_chunk_cache(self) -> list[dict]:
+        if self._chunk_cache is None:
+            data = self.collection.get(include=["documents", "metadatas"])
+            documents = data.get("documents", [])
+            metadatas = data.get("metadatas", [])
+            self._chunk_cache = [
+                self._build_cache_item(document_text, metadata)
+                for document_text, metadata in zip(documents, metadatas)
+                if document_text and metadata
+            ]
+
+        return self._chunk_cache
+
+    def _append_to_chunk_cache(self, documents: List[str], metadatas: List[dict]) -> None:
+        if self._chunk_cache is None:
+            return
+
+        self._chunk_cache.extend(
+            self._build_cache_item(document_text, metadata)
+            for document_text, metadata in zip(documents, metadatas)
+            if document_text and metadata
+        )
+
+    def _build_cache_item(self, document_text: str, metadata: dict) -> dict:
+        lower_text = document_text.lower()
+        terms = self._tokenize(document_text)
+        return {
+            "document": document_text,
+            "metadata": metadata,
+            "lower_text": lower_text,
+            "term_counts": Counter(terms),
+        }
 
     def _local_embed_texts(self, values: List[str]) -> List[List[float]]:
         embeddings: List[List[float]] = []
