@@ -91,6 +91,8 @@ class RagService:
                     "filename": upload.filename,
                     "chunk_index": index,
                     "character_count": len(text),
+                    "embedding_provider": self._embedding_provider_name(),
+                    "embedding_model": self._embedding_model_name(),
                 }
                 for index, _ in enumerate(chunks)
             ]
@@ -140,9 +142,13 @@ class RagService:
 
         context = "\n\n".join(context_parts)
         prompt = (
+            "You are Qura, a professional document intelligence assistant. "
             "Answer the user's question using only the provided document context. "
-            "If the answer is not grounded in the context, say that clearly. "
-            "Keep the answer concise and practical.\n\n"
+            "Synthesize the relevant information instead of copying long passages. "
+            "Be direct, polished, and specific. "
+            "Do not start with phrases like 'Based on the processed document context'. "
+            "If the documents do not contain enough information to answer, say that clearly "
+            "and briefly explain what is missing.\n\n"
             f"Question:\n{question}\n\n"
             f"Context:\n{context}"
         )
@@ -153,8 +159,9 @@ class RagService:
                 response = self.google_client.models.generate_content(
                     model=self.settings.gemini_model,
                     contents=(
-                        "You are a retrieval-augmented assistant. "
-                        "Use retrieved context faithfully and do not invent citations.\n\n"
+                        "Follow the document context faithfully. "
+                        "Do not invent facts, numbers, names, dates, or citations. "
+                        "Write naturally, like a capable AI assistant answering a user.\n\n"
                         f"{prompt}"
                     ),
                 )
@@ -165,22 +172,26 @@ class RagService:
         return answer, sources
 
     def _retrieve_context(self, question: str) -> tuple[List[str], List[dict]]:
-        if self.settings.use_google_embeddings and self.settings.google_api_key:
-            try:
-                query_embedding = self._embed_texts([question])[0]
-                results = self.collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=self.settings.top_k_results,
-                    include=["documents", "metadatas", "distances"],
-                )
-                return (
-                    results.get("documents", [[]])[0],
-                    results.get("metadatas", [[]])[0],
-                )
-            except Exception:
-                pass
+        documents, metadatas = self._vector_retrieve(question)
+        if documents:
+            return documents, metadatas
 
         return self._keyword_retrieve(question)
+
+    def _vector_retrieve(self, question: str) -> tuple[List[str], List[dict]]:
+        try:
+            query_embedding = self._embed_texts([question])[0]
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=self.settings.top_k_results,
+                include=["documents", "metadatas", "distances"],
+            )
+            return (
+                results.get("documents", [[]])[0],
+                results.get("metadatas", [[]])[0],
+            )
+        except Exception:
+            return [], []
 
     def _keyword_retrieve(self, question: str) -> tuple[List[str], List[dict]]:
         cache = self._get_chunk_cache()
@@ -218,26 +229,60 @@ class RagService:
         return [item[0] for item in selected], [item[1] for item in selected]
 
     def _extractive_answer(self, question: str, documents: List[str]) -> str:
-        query_terms = set(self._tokenize(question))
-        sentences = []
+        query_vector = self._local_embed_texts([question])[0]
+        sentence_candidates = []
 
         for document_text in documents:
             for sentence in re.split(r"(?<=[.!?])\s+", document_text):
                 cleaned = sentence.strip()
                 if not cleaned:
                     continue
-                score = sum(1 for term in self._tokenize(cleaned) if term in query_terms)
-                sentences.append((score, cleaned))
+                sentence_candidates.append(cleaned)
 
-        sentences.sort(reverse=True)
-        selected = [sentence for score, sentence in sentences if score > 0][:3]
+        sentence_vectors = self._local_embed_texts(sentence_candidates)
+        ranked_sentences = sorted(
+            (
+                (self._cosine_similarity(query_vector, sentence_vector), sentence)
+                for sentence, sentence_vector in zip(sentence_candidates, sentence_vectors)
+            ),
+            reverse=True,
+        )
+        selected = [sentence for score, sentence in ranked_sentences if score > 0][:3]
         if not selected:
             selected = [document.strip() for document in documents if document.strip()][:1]
 
         if not selected:
             return "I could not find relevant text in the processed documents."
 
-        return "Based on the processed document context:\n\n" + "\n\n".join(selected)
+        return self._format_local_answer(selected)
+
+    def _cosine_similarity(self, left: List[float], right: List[float]) -> float:
+        if not left or not right:
+            return 0.0
+
+        return sum(a * b for a, b in zip(left, right))
+
+    def _format_local_answer(self, selected: List[str]) -> str:
+        cleaned = []
+        seen = set()
+
+        for sentence in selected:
+            value = " ".join(sentence.split())
+            if not value:
+                continue
+            normalized = value.lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            cleaned.append(value)
+
+        if not cleaned:
+            return "I could not find enough relevant information in the uploaded documents to answer that confidently."
+
+        if len(cleaned) == 1:
+            return cleaned[0]
+
+        return "\n\n".join(f"- {sentence}" for sentence in cleaned)
 
     def _tokenize(self, value: str) -> List[str]:
         stop_words = {
@@ -330,6 +375,18 @@ class RagService:
             return self._local_embed_texts(values)
 
         return embeddings
+
+    def _embedding_provider_name(self) -> str:
+        if self.settings.use_google_embeddings and self.settings.google_api_key:
+            return "google"
+
+        return "local"
+
+    def _embedding_model_name(self) -> str:
+        if self.settings.use_google_embeddings and self.settings.google_api_key:
+            return self.settings.embedding_model
+
+        return "local-hash"
 
     def _get_chunk_cache(self) -> list[dict]:
         if self._chunk_cache is None:
